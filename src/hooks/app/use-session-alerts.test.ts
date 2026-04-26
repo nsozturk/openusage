@@ -163,6 +163,50 @@ describe("useSessionAlerts", () => {
     expect(invokeMock).not.toHaveBeenCalled()
   })
 
+  it("alerts when resetsAt advances to the next cycle (probe refreshed past the reset)", async () => {
+    const previousResetsAt = new Date(Date.now() - 60_000).toISOString()
+    const nextResetsAt = new Date(Date.now() + 5 * 60 * 60_000).toISOString()
+
+    const { rerender } = renderHook(
+      ({ resetsAt }: { resetsAt: string }) =>
+        useSessionAlerts({
+          pluginStates: { claude: createPluginState(resetsAt) },
+          sessionAlertSettings: defaultSettings,
+        }),
+      { initialProps: { resetsAt: previousResetsAt } }
+    )
+
+    await waitFor(() => expect(sendNotificationMock).toHaveBeenCalledTimes(1))
+    sendNotificationMock.mockClear()
+
+    rerender({ resetsAt: nextResetsAt })
+
+    await waitFor(() => expect(requestPermissionMock).toHaveBeenCalled())
+    expect(sendNotificationMock).not.toHaveBeenCalled()
+  })
+
+  it("alerts via change detection when probe refreshes immediately after reset", async () => {
+    const justBeforeReset = new Date(Date.now() + 5_000).toISOString()
+    const nextCycle = new Date(Date.now() + 5 * 60 * 60_000).toISOString()
+
+    const { rerender } = renderHook(
+      ({ resetsAt }: { resetsAt: string }) =>
+        useSessionAlerts({
+          pluginStates: { claude: createPluginState(resetsAt) },
+          sessionAlertSettings: defaultSettings,
+        }),
+      { initialProps: { resetsAt: justBeforeReset } }
+    )
+
+    await waitFor(() => expect(requestPermissionMock).toHaveBeenCalled())
+    expect(sendNotificationMock).not.toHaveBeenCalled()
+
+    vi.setSystemTime(new Date(Date.parse(justBeforeReset) + 10_000))
+    rerender({ resetsAt: nextCycle })
+
+    await waitFor(() => expect(sendNotificationMock).toHaveBeenCalledTimes(1))
+  })
+
   it("does not play a bundled sound when the provider audio is missing", async () => {
     const resetsAt = new Date(Date.now() - 60_000).toISOString()
 

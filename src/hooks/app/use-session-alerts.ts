@@ -39,6 +39,7 @@ export function useSessionAlerts({
   sessionAlertSettings: SessionAlertSettings
 }) {
   const alertedRef = useRef<Set<string>>(new Set())
+  const previousResetsAtRef = useRef<Map<string, string>>(new Map())
 
   useEffect(() => {
     if (sessionAlertSettings.enabledAlerts.length === 0) return
@@ -67,23 +68,42 @@ export function useSessionAlerts({
           const resetsAtMs = Date.parse(line.resetsAt)
           if (!Number.isFinite(resetsAtMs)) continue
 
-          const key = getAlertKey(pluginId, line.label, line.resetsAt)
+          const lineKey = `${pluginId}::${line.label}`
+          const previousResetsAt = previousResetsAtRef.current.get(lineKey)
+          previousResetsAtRef.current.set(lineKey, line.resetsAt)
 
-          if (now >= resetsAtMs && now - resetsAtMs <= RESET_ALERT_WINDOW_MS && !alertedRef.current.has(key)) {
-            alertedRef.current.add(key)
+          let triggerResetsAt: string | null = null
 
-            const soundEntry = getNotificationSoundEntry(pluginId, line.label)
-            const body = soundEntry?.message ?? `${state.data.displayName} ${line.label} refreshed.`
-
-            try {
-              sendNotification({ title: "Limit Refreshed", body })
-            } catch (error) {
-              console.error("Failed to send notification:", error)
+          if (now >= resetsAtMs && now - resetsAtMs <= RESET_ALERT_WINDOW_MS) {
+            triggerResetsAt = line.resetsAt
+          } else if (previousResetsAt && previousResetsAt !== line.resetsAt) {
+            const previousMs = Date.parse(previousResetsAt)
+            if (
+              Number.isFinite(previousMs) &&
+              now >= previousMs &&
+              now - previousMs <= RESET_ALERT_WINDOW_MS
+            ) {
+              triggerResetsAt = previousResetsAt
             }
+          }
 
-            if (sessionAlertSettings.sound === "bundled" && soundEntry) {
-              void playBundledSound(soundEntry.file)
-            }
+          if (!triggerResetsAt) continue
+
+          const key = getAlertKey(pluginId, line.label, triggerResetsAt)
+          if (alertedRef.current.has(key)) continue
+          alertedRef.current.add(key)
+
+          const soundEntry = getNotificationSoundEntry(pluginId, line.label)
+          const body = soundEntry?.message ?? `${state.data.displayName} ${line.label} refreshed.`
+
+          try {
+            sendNotification({ title: "Limit Refreshed", body })
+          } catch (error) {
+            console.error("Failed to send notification:", error)
+          }
+
+          if (sessionAlertSettings.sound === "bundled" && soundEntry) {
+            void playBundledSound(soundEntry.file)
           }
         }
       }
